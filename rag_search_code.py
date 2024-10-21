@@ -89,3 +89,7 @@ query = "greet"
 results = rag_search(sample_code, query)
 print(results)
 
+# Mac run: 
+# @ prunp rag_search_code.py
+# [('greet_user', np.float64(0.5930675716272089))]
+
