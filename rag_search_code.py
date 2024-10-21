@@ -1,6 +1,7 @@
 ## python rag : use treesitter  the python code to search ，and then  embed  calc consin search list sort & embed_code use  ollama nomic-embed-text
 import os
 import tree_sitter
+import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -8,9 +9,8 @@ import requests
 import json
 
 # Step 1: Set up Tree-sitter for Python
-PY_LANGUAGE = Language(os.path.expanduser('~/.tree-sitter/python.so'), 'python')
-parser = Parser()
-parser.set_language(PY_LANGUAGE)
+PY_LANGUAGE = Language(tspython.language()) #Language(os.path.expanduser('~/.tree-sitter/python.so'), 'python')
+parser = Parser(PY_LANGUAGE)
 
 def search_code(code, query):
     tree = parser.parse(bytes(code, "utf8"))
