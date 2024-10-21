@@ -1,7 +1,8 @@
 sudo apt update
 sudo apt install build-essential git
 
-sudo apt install tree-sitter-cli
+# Mac: brew install tree-sitter
+sudo apt install tree-sitter-cli 
 git clone https://github.com/tree-sitter/tree-sitter-python.git
 cd tree-sitter-python
 
