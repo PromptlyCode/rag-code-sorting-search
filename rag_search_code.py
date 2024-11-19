@@ -28,11 +28,19 @@ def extract_functions_from_file(file_path):
         for node in root_node.children:
             if node.type == 'function_definition':
                 function_name = node.child_by_field_name('name').text.decode('utf8')
-                function_code = code[node.start_point[0]:node.end_point[0]]
+                function_code = code[node.start_byte:node.end_byte]
+                
+                # Calculate line numbers
+                start_line = node.start_point[0] + 1  # Convert to 1-based line numbering
+                end_line = node.end_point[0] + 1
+                
                 functions.append({
                     'name': function_name,
                     'code': function_code,
-                    'file': str(file_path)
+                    'file': str(file_path),
+                    'start_line': start_line,
+                    'end_line': end_line,
+                    'full_file_content': code  # Store the full file content
                 })
         return functions
     except Exception as e:
@@ -88,6 +96,25 @@ def build_index(directory):
     
     print(f"Index built successfully. Total functions indexed: {len(functions)}")
 
+def get_context_lines(full_content, start_line, end_line, context_lines=3):
+    """Get additional context lines before and after the function."""
+    lines = full_content.splitlines()
+    
+    context_start = max(0, start_line - context_lines - 1)
+    context_end = min(len(lines), end_line + context_lines)
+    
+    before_context = lines[context_start:start_line-1]
+    function_lines = lines[start_line-1:end_line]
+    after_context = lines[end_line:context_end]
+    
+    return {
+        'before_context': before_context,
+        'function': function_lines,
+        'after_context': after_context,
+        'context_start_line': context_start + 1,
+        'context_end_line': context_end
+    }
+
 def search_code(query, top_k=5):
     """Search for similar code using the built index."""
     try:
@@ -106,12 +133,26 @@ def search_code(query, top_k=5):
         results = []
         for i, (distance, idx) in enumerate(zip(D[0], I[0])):
             func = functions[idx]
+            
+            # Get context lines
+            context = get_context_lines(
+                func['full_file_content'],
+                func['start_line'],
+                func['end_line']
+            )
+            
             results.append({
                 'rank': i + 1,
                 'score': 1 / (1 + distance),  # Convert distance to similarity score
                 'function_name': func['name'],
                 'file': func['file'],
-                'code': func['code']
+                'start_line': func['start_line'],
+                'end_line': func['end_line'],
+                'before_context': context['before_context'],
+                'function_code': context['function'],
+                'after_context': context['after_context'],
+                'context_start_line': context['context_start_line'],
+                'context_end_line': context['context_end_line']
             })
         
         return results
@@ -143,10 +184,18 @@ def main():
             for result in results:
                 print(f"\nRank: {result['rank']}")
                 print(f"Score: {result['score']:.4f}")
-                print(f"Function: {result['function_name']}")
                 print(f"File: {result['file']}")
-                print("Code:")
-                print(result['code'])
+                print(f"Function: {result['function_name']} (lines {result['start_line']}-{result['end_line']})")
+                print("\nCode with context:")
+                # Print context before
+                for i, line in enumerate(result['before_context'], start=result['context_start_line']):
+                    print(f"{i:4d} | {line}")
+                # Print function code
+                for i, line in enumerate(result['function_code'], start=result['start_line']):
+                    print(f"{i:4d} | {line}")
+                # Print context after
+                for i, line in enumerate(result['after_context'], start=result['end_line'] + 1):
+                    print(f"{i:4d} | {line}")
                 print("-" * 80)
 
 if __name__ == "__main__":
