@@ -1,4 +1,3 @@
-## python rag : use treesitter  the python code to search ，and then  embed  calc consin search list sort & embed_code use  ollama nomic-embed-text
 import os
 import tree_sitter
 import tree_sitter_python as tspython
@@ -7,89 +6,149 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
 import json
+import faiss
+import argparse
+from pathlib import Path
+import pickle
 
-# Step 1: Set up Tree-sitter for Python
+# Set up Tree-sitter for Python
 PY_LANGUAGE = Language(tspython.language()) #Language(os.path.expanduser('~/.tree-sitter/python.so'), 'python')
 parser = Parser(PY_LANGUAGE)
 
-def search_code(code, query):
-    tree = parser.parse(bytes(code, "utf8"))
-    root_node = tree.root_node
+def extract_functions_from_file(file_path):
+    """Extract all function definitions from a Python file."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            code = f.read()
+        
+        tree = parser.parse(bytes(code, "utf8"))
+        root_node = tree.root_node
+        
+        functions = []
+        for node in root_node.children:
+            if node.type == 'function_definition':
+                function_name = node.child_by_field_name('name').text.decode('utf8')
+                function_code = code[node.start_point[0]:node.end_point[0]]
+                functions.append({
+                    'name': function_name,
+                    'code': function_code,
+                    'file': str(file_path)
+                })
+        return functions
+    except Exception as e:
+        print(f"Error processing {file_path}: {e}")
+        return []
 
-    results = []
-    for node in root_node.children:
-        if node.type == 'function_definition':
-            function_name = node.child_by_field_name('name').text.decode('utf8')
-            if query.lower() in function_name.lower():
-                results.append((function_name, node.start_point, node.end_point))
-
-    return results
-
-# Step 2: Embed code snippets using Ollama Nomic Embed Text
 def embed_code(code_snippets):
+    """Embed code using Ollama Nomic Embed Text."""
     embeddings = []
     for snippet in code_snippets:
         response = requests.post('http://localhost:11434/api/embeddings',
-                                 json={
-                                     "model": "nomic-embed-text",
-                                     "prompt": snippet
-                                 })
+                               json={
+                                   "model": "nomic-embed-text",
+                                   "prompt": snippet
+                               })
         if response.status_code == 200:
             embedding = response.json()['embedding']
             embeddings.append(embedding)
         else:
             print(f"Error embedding snippet: {response.status_code}")
-            embeddings.append([0] * 768)  # Default to zero vector on error
-    return np.array(embeddings)
+            embeddings.append([0] * 768)
+    return np.array(embeddings, dtype=np.float32)
 
-# Step 3: Cosine similarity search
-def cosine_search(query_embedding, code_embeddings):
-    similarities = cosine_similarity([query_embedding], code_embeddings)
-    return similarities.flatten()
+def build_index(directory):
+    """Build FAISS index from Python files in directory."""
+    functions = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.py'):
+                file_path = Path(root) / file
+                functions.extend(extract_functions_from_file(file_path))
+    
+    if not functions:
+        print("No Python functions found in the directory.")
+        return
+    
+    # Embed all function codes
+    code_snippets = [f['code'] for f in functions]
+    embeddings = embed_code(code_snippets)
+    
+    # Initialize FAISS index
+    dimension = embeddings.shape[1]  # Should be 768 for nomic-embed-text
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
+    
+    # Save index and metadata
+    output_dir = Path('code_search_index')
+    output_dir.mkdir(exist_ok=True)
+    
+    faiss.write_index(index, str(output_dir / 'code.index'))
+    with open(output_dir / 'metadata.pkl', 'wb') as f:
+        pickle.dump(functions, f)
+    
+    print(f"Index built successfully. Total functions indexed: {len(functions)}")
 
-# Step 4: Main RAG function
-def rag_search(code, query):
-    # Search for relevant functions
-    search_results = search_code(code, query)
+def search_code(query, top_k=5):
+    """Search for similar code using the built index."""
+    try:
+        # Load index and metadata
+        index = faiss.read_index('code_search_index/code.index')
+        with open('code_search_index/metadata.pkl', 'rb') as f:
+            functions = pickle.load(f)
+        
+        # Embed query
+        query_embedding = embed_code([query])[0].reshape(1, -1)
+        
+        # Search
+        D, I = index.search(query_embedding, top_k)
+        
+        # Format results
+        results = []
+        for i, (distance, idx) in enumerate(zip(D[0], I[0])):
+            func = functions[idx]
+            results.append({
+                'rank': i + 1,
+                'score': 1 / (1 + distance),  # Convert distance to similarity score
+                'function_name': func['name'],
+                'file': func['file'],
+                'code': func['code']
+            })
+        
+        return results
+    
+    except FileNotFoundError:
+        return "Index not found. Please build the index first using the build command."
 
-    if not search_results:
-        return "No matching functions found."
+def main():
+    parser = argparse.ArgumentParser(description='Code Search Tool')
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # Build command
+    build_parser = subparsers.add_parser('build', help='Build search index')
+    build_parser.add_argument('directory', type=str, help='Directory containing Python files')
+    
+    # Search command
+    search_parser = subparsers.add_parser('search', help='Search for code')
+    search_parser.add_argument('query', type=str, help='Search query')
+    
+    args = parser.parse_args()
+    
+    if args.command == 'build':
+        build_index(args.directory)
+    elif args.command == 'search':
+        results = search_code(args.query)
+        if isinstance(results, str):
+            print(results)
+        else:
+            for result in results:
+                print(f"\nRank: {result['rank']}")
+                print(f"Score: {result['score']:.4f}")
+                print(f"Function: {result['function_name']}")
+                print(f"File: {result['file']}")
+                print("Code:")
+                print(result['code'])
+                print("-" * 80)
 
-    # Extract function names and code snippets
-    function_names = [result[0] for result in search_results]
-    code_snippets = [code[result[1][0]:result[2][0]] for result in search_results]
-
-    # Embed code snippets
-    code_embeddings = embed_code(code_snippets)
-
-    # Embed query
-    query_embedding = embed_code([query])[0]  # Take the first (and only) embedding
-
-    # Perform cosine similarity search
-    similarities = cosine_search(query_embedding, code_embeddings)
-
-    # Sort results by similarity
-    sorted_results = sorted(zip(function_names, similarities), key=lambda x: x[1], reverse=True)
-
-    return sorted_results
-
-# Example usage
-sample_code = """
-def hello_world():
-    print("Hello, World!")
-
-def greet_user(name):
-    print(f"Hello, {name}!")
-
-def calculate_sum(a, b):
-    return a + b
-"""
-
-query = "greet"
-results = rag_search(sample_code, query)
-print(results)
-
-# Mac run: 
-# @ prunp rag_search_code.py
-# [('greet_user', np.float64(0.5930675716272089))]
+if __name__ == "__main__":
+    main()
 
