@@ -22,11 +22,15 @@ ollama run nomic-embed-text
 * index
 ```sh
 $ poetry run python rag_search_code.py build /Users/clojure/Desktop/rag-code-sorting-search
+
+$ ls .promptlycode/code_search_index/
+code.index   metadata.pkl
+
 ```
 
 * search 
 ```sh
-$ poetry run python rag_search_code.py search "search code"
+$ poetry run python  rag_search_code.py search /Users/clojure/Desktop/rag-code-sorting-search "search code"
 
 Rank: 1
 Score: 0.0037

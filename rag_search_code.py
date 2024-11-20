@@ -17,6 +17,7 @@ def main():
 
     # Search command
     search_parser = subparsers.add_parser('search', help='Search for code')
+    search_parser.add_argument('directory', type=str, help='Directory containing the index')
     search_parser.add_argument('query', type=str, help='Search query')
 
     args = parser.parse_args()
@@ -24,7 +25,7 @@ def main():
     if args.command == 'build':
         build_index(args.directory)
     elif args.command == 'search':
-        results = search_code(args.query, embed_code)
+        results = search_code(args.directory, args.query, embed_code)
         if isinstance(results, str):
             print(results)
         else:

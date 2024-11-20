@@ -13,6 +13,14 @@ import pickle
 PY_LANGUAGE = Language(tspython.language()) #Language(os.path.expanduser('~/.tree-sitter/python.so'), 'python')
 parser = Parser(PY_LANGUAGE)
 
+INDEX_DIR = '.promptlycode/code_search_index'
+
+def ensure_index_dir(base_dir):
+    """Create the index directory if it doesn't exist."""
+    index_path = Path(base_dir) / INDEX_DIR
+    index_path.mkdir(parents=True, exist_ok=True)
+    return index_path
+
 def extract_functions_from_file(file_path):
     """Extract all function definitions from a Python file."""
     try:
@@ -29,7 +37,7 @@ def extract_functions_from_file(file_path):
                 function_code = code[node.start_byte:node.end_byte]
 
                 # Calculate line numbers
-                start_line = node.start_point[0] + 1  # Convert to 1-based line numbering
+                start_line = node.start_point[0] + 1
                 end_line = node.end_point[0] + 1
 
                 functions.append({
@@ -38,7 +46,7 @@ def extract_functions_from_file(file_path):
                     'file': str(file_path),
                     'start_line': start_line,
                     'end_line': end_line,
-                    'full_file_content': code  # Store the full file content
+                    'full_file_content': code
                 })
         return functions
     except Exception as e:
@@ -65,6 +73,8 @@ def embed_code(code_snippets):
 def build_index(directory):
     """Build FAISS index from Python files in directory."""
     functions = []
+    base_dir = Path(directory)
+
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith('.py'):
@@ -84,12 +94,12 @@ def build_index(directory):
     index = faiss.IndexFlatL2(dimension)
     index.add(embeddings)
 
-    # Save index and metadata
-    output_dir = Path('code_search_index')
-    output_dir.mkdir(exist_ok=True)
+    # Save index and metadata in the specified directory
+    index_dir = ensure_index_dir(base_dir)
 
-    faiss.write_index(index, str(output_dir / 'code.index'))
-    with open(output_dir / 'metadata.pkl', 'wb') as f:
+    faiss.write_index(index, str(index_dir / 'code.index'))
+    with open(index_dir / 'metadata.pkl', 'wb') as f:
         pickle.dump(functions, f)
 
-    print(f"Index built successfully. Total functions indexed: {len(functions)}")
+    print(f"Index built successfully at {index_dir}")
+    print(f"Total functions indexed: {len(functions)}")

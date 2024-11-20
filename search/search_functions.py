@@ -1,5 +1,8 @@
 import faiss
 import pickle
+from pathlib import Path
+
+INDEX_DIR = '.promptlycode/code_search_index'
 
 def get_context_lines(full_content, start_line, end_line, context_lines=3):
     """Get additional context lines before and after the function."""
@@ -20,12 +23,15 @@ def get_context_lines(full_content, start_line, end_line, context_lines=3):
         'context_end_line': context_end
     }
 
-def search_code(query, embed_code, top_k=5):
+def search_code(directory, query, embed_code, top_k=5):
     """Search for similar code using the built index."""
     try:
+        # Get index directory
+        index_dir = Path(directory) / INDEX_DIR
+
         # Load index and metadata
-        index = faiss.read_index('code_search_index/code.index')
-        with open('code_search_index/metadata.pkl', 'rb') as f:
+        index = faiss.read_index(str(index_dir / 'code.index'))
+        with open(index_dir / 'metadata.pkl', 'rb') as f:
             functions = pickle.load(f)
 
         # Embed query
@@ -48,7 +54,7 @@ def search_code(query, embed_code, top_k=5):
 
             results.append({
                 'rank': i + 1,
-                'score': 1 / (1 + distance),  # Convert distance to similarity score
+                'score': 1 / (1 + distance),
                 'function_name': func['name'],
                 'file': func['file'],
                 'start_line': func['start_line'],
@@ -63,4 +69,4 @@ def search_code(query, embed_code, top_k=5):
         return results
 
     except FileNotFoundError:
-        return "Index not found. Please build the index first using the build command."
+        return f"Index not found in {index_dir}. Please build the index first using the build command."
